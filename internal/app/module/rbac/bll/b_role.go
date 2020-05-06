@@ -1,0 +1,139 @@
+package bll
+
+import (
+	"context"
+
+	"github.com/LyricTian/gin-admin/internal/app/module/rbac/model"
+	"github.com/LyricTian/gin-admin/internal/app/module/rbac/schema"
+	gschema "github.com/LyricTian/gin-admin/internal/app/schema"
+	"github.com/LyricTian/gin-admin/pkg/errors"
+	"github.com/LyricTian/gin-admin/pkg/util"
+)
+
+// NewRole 创建菜单管理实例
+func NewRole(m *model.Common) *Role {
+	return &Role{
+		RoleModel: m.Role,
+		MenuModel: m.Menu,
+	}
+}
+
+// Role 角色管理
+type Role struct {
+	RoleModel *model.Role
+	MenuModel *model.Menu
+}
+
+// QueryPage 查询分页数据
+func (a *Role) QueryPage(ctx context.Context, params schema.RoleQueryParam, pp *gschema.PaginationParam) ([]*schema.Role, *gschema.PaginationResult, error) {
+	result, err := a.RoleModel.Query(ctx, params, schema.RoleQueryOptions{
+		PageParam: pp,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return result.Data, result.PageResult, nil
+}
+
+// QuerySelect 查询选择数据
+func (a *Role) QuerySelect(ctx context.Context) ([]*schema.Role, error) {
+	result, err := a.RoleModel.Query(ctx, schema.RoleQueryParam{})
+	if err != nil {
+		return nil, err
+	}
+
+	// 清空部分字段数据
+	return result.Data.ForEach(func(item *schema.Role, _ int) {
+		item.Memo = ""
+		item.Sequence = 0
+		item.Creator = ""
+		item.CreatedAt = nil
+		item.UpdatedAt = nil
+	}), nil
+}
+
+// Get 查询指定数据
+func (a *Role) Get(ctx context.Context, recordID string) (*schema.Role, error) {
+	item, err := a.RoleModel.Get(ctx, recordID, schema.RoleQueryOptions{IncludeMenus: true})
+	if err != nil {
+		return nil, err
+	} else if item == nil {
+		return nil, errors.ErrNotFound
+	}
+
+	return item, nil
+}
+
+func (a *Role) checkName(ctx context.Context, name string) error {
+	result, err := a.RoleModel.Query(ctx, schema.RoleQueryParam{
+		Name: name,
+	}, schema.RoleQueryOptions{
+		PageParam: &gschema.PaginationParam{PageSize: -1},
+	})
+	if err != nil {
+		return err
+	} else if result.PageResult.Total > 0 {
+		return errors.NewBadRequestError("角色名称已经存在")
+	}
+	return nil
+}
+
+// Create 创建数据
+func (a *Role) Create(ctx context.Context, item schema.Role) (*schema.Role, error) {
+	err := a.checkName(ctx, item.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	item.RecordID = util.MustUUID()
+	item.Creator = GetUserID(ctx)
+	err = a.RoleModel.Create(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+
+	nitem, err := a.Get(ctx, item.RecordID)
+	if err != nil {
+		return nil, err
+	}
+
+	return nitem, nil
+}
+
+// Update 更新数据
+func (a *Role) Update(ctx context.Context, recordID string, item schema.Role) (*schema.Role, error) {
+	oldItem, err := a.RoleModel.Get(ctx, recordID)
+	if err != nil {
+		return nil, err
+	} else if oldItem == nil {
+		return nil, errors.ErrNotFound
+	} else if oldItem.Name != item.Name {
+		err := a.checkName(ctx, item.Name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = a.RoleModel.Update(ctx, recordID, item)
+	if err != nil {
+		return nil, err
+	}
+
+	nitem, err := a.Get(ctx, item.RecordID)
+	if err != nil {
+		return nil, err
+	}
+
+	return nitem, nil
+}
+
+// Delete 删除数据
+func (a *Role) Delete(ctx context.Context, recordID string) error {
+	// TODO: 如果用户已经被赋予该角色，则不允许删除
+	err := a.RoleModel.Delete(ctx, recordID)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
